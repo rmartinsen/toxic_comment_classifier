@@ -16,35 +16,41 @@ TEST_CSV = "test.csv"
 
 class ToxicClassifierHelper:
     def __init__(self, vocab_size=VOCAB_SIZE, max_text_len=MAX_TEXT_LEN, model_dir=MODEL_DIR,
-                 submission_dir=SUBMISSION_DIR, train_csv="train.csv", test_csv="test.csv",
+                 submission_dir=SUBMISSION_DIR, train_csv="train.csv", submission_csv="test.csv",
                  embedding_dim=EMBEDDING_DIM):
         self.tokenizer = Tokenizer(num_words=vocab_size)
         self.max_text_len = max_text_len
         self.model_dir = model_dir
         self.submission_dir = submission_dir
-        self.train_csv = train_csv
-        self.test_csv = test_csv
-        self.training_data = self.load_training_data()
+        self.train_df, self.raw_submission_df = self.load_training_and_test_data(train_csv,
+                                                                                 submission_csv)
         self.initialize_tokenizer()
+        self.X_submit = self.create_submission_data()
 
-    def load_training_data(self):
-        train_df = pd.read_csv(self.train_csv)
+    def load_training_and_test_data(self, train_csv, submission_csv):
+        train_df = pd.read_csv(train_csv)
         assert len(train_df) == 95851, "Training csv does not contain 95,851 records"
-
-        return train_df
+        submission_df = pd.read_csv(submission_csv)
+        assert len(submission_df) == 226998, "Test csv does not contain 226,998 records"
+        return train_df, submission_df
 
     def initialize_tokenizer(self):
-        if len(self.training_data) == 0:
-            self.load_training_data()
+        if len(self.train_df) == 0:
+            self.load_train_df()
 
-        comment_text = self.training_data["comment_text"]
+        comment_text = self.train_df["comment_text"]
         self.tokenizer.fit_on_texts(comment_text)
 
     def create_train_test_split(self, test_size):
-        X = self.create_padded_tokens(self.training_data)
-        y = self.create_y_classes(self.training_data)
+        X = self.create_padded_tokens(self.train_df)
+        y = self.create_y_classes(self.train_df)
 
         return train_test_split(X, y, test_size=test_size)
+
+    def create_submission_data(self):
+        submission_df = self.create_padded_tokens(self.raw_submission_df)
+        submission_df.set_index("id", inplace=True)
+        return submission_df
 
     def create_padded_tokens(self, df):
         comment_text = df["comment_text"].astype(str)
@@ -65,14 +71,10 @@ class ToxicClassifierHelper:
         print("Model saved to:%s" % save_file)
 
     def create_submission(self, model, submission_name):
-        submission_input = pd.read_csv(self.test_csv)
-        submission_input.set_index("id", inplace=True)
-
-        X_submit = self.create_padded_tokens(submission_input)
-        preds = model.predict(X_submit)
-
+        preds = model.predict(self.X_submit)
+        return preds
         pred_columns = ["toxic", "severe_toxic", "obscene", "threat", "insult", "identity_hate"]
-        submission = submission_input.reindex(columns=pred_columns)
+        submission = pd.DataFrame(colnames=pred_columns)
         submission[pred_columns] = preds
 
         assert submission.shape == (226998, 5), "Submission shape is not (226998, 6)"
